@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 from jax import random
 from jax import grad
-
+import optax
 
 def sigmoid(x):
     return 1 / (1+jnp.exp(-x))
@@ -15,6 +15,10 @@ def silu(x):
 def softmax(x):
     exps = jnp.exp(x)
     return exps / exps.sum(axis=-1,keepdims=True)
+
+def log_softmax(x):
+    exps = jnp.exp(x)
+    return jnp.log(exps / exps.sum(axis=-1,keepdims=True))
 
 
 class FFN:
@@ -71,7 +75,7 @@ class Attention:
     def init(self,key):
         d = self.d_head
         keys = jax.random.split(key, 4)
-        scale = jnp.sqrt(1/d_model)
+        scale = jnp.sqrt(1/self.d_model)
         wq = jax.random.normal(keys[0],(self.n_heads,self.d_model,d)) * scale
         wk = jax.random.normal(keys[1],(self.n_heads,self.d_model,d)) * scale
         wv = jax.random.normal(keys[2],(self.n_heads,self.d_model,d)) * scale
@@ -111,7 +115,7 @@ class LatentAttention:
         
     def init(self,key):
         keys  = jax.random.split(key, 6)
-        scale = jnp.sqrt(1/d_model)
+        scale = jnp.sqrt(1/self.d_model)
         
         wdkv =  jax.random.normal(keys[0],(self.n_heads,self.d_model, self.d_latent)) * scale
         wdq  =  jax.random.normal(keys[1],(self.n_heads,self.d_model, self.d_latent)) * scale
@@ -155,9 +159,9 @@ class LatentCompression:
 
     def init(self,key):
         keys  = jax.random.split(key, 2)
-        scale = jnp.sqrt(1/d_model)
-        down = jax.random.normal(keys[0],(self.dmodel,self.d_latent)) * scale
-        up = jax.random.normal(keys[1],(self.dmodel,self.d_latent)) * scale
+        scale = jnp.sqrt(1/self.d_model)
+        down = jax.random.normal(keys[0],(self.d_model,self.d_latent)) * scale
+        up = jax.random.normal(keys[1],(self.d_model,self.d_latent)) * scale
         return {'up': up, 'down': down}
     
     def __call__(self,params,x):
@@ -196,8 +200,8 @@ class PredictionHead:
         
     def init(self,key):
         keys = jax.random.split(key,2)
-        w = jax.random.normal(keys[0],(self.d_model,self.v_size))
-        b = jax.random.normal(keys[1],(self.v_size,))
+        w = jax.random.normal(keys[0],(self.d_model,self.v_size))*1/jnp.sqrt(self.d_model)
+        b = jax.random.normal(keys[1],(self.v_size,))*1/jnp.sqrt(self.d_model)
         return {'w':w,'b':b}
     def __call__(self,params,x):
         return jnp.einsum('btc,cj->btj',x,params['w']) + params['b']
@@ -206,6 +210,7 @@ class Patching:
     def __init__(self,model,vocab):
         self.model = model
         self.vocab = vocab
+        
     def init(self):
         return model.init()
         
@@ -222,34 +227,42 @@ class Patching:
         return [1 if xi>omega else 0 for xi in ent]
     
 
-class ByteEmbedding:
+class ByteTokenizer:
     def __init__(self,data,d_model):
         unique_bytes = sorted(set(data))
         v_size = len(unique_bytes)
-        self.byte_to_id = {b: jax.nn.one_hot(i,v_size) for i,b in enumerate(unique_bytes)}
+        self.byte_to_id = {b: i for i,b in enumerate(unique_bytes)}
         self.id_to_byte = {i: b for i,b in enumerate(unique_bytes)}
-        self.d_model =d_model
-        
-    def init(self,key):
-        return {'w_embed' : jax.random.normal(key,(v_size,self.d_model))}
     
     def encode(self,params,byte):
-        return jnp.einsum('v,vt-> t',self.byte_to_id[byte],params['w_embed'])
+        return byte_to_id[byte]
     
-    def decode(self,params,i):
-        return id_to_byte[i]
+    def decode(self,params,token):
+        return id_to_byte[token]
 
+class Embeddings:
+    def __init__(self,d_model,v_size):
+        self.d_model=d_model
+        self.v_size = v_size
+
+    def init(self,key):
+        return {'w_embed' : jax.random.normal(key,(self.v_size,self.d_model))*1/jnp.sqrt(self.d_model)}
+
+    def __call__(self,params,token_ids):
+        return params['w_embed'][token_ids]
+
+    
 class Transformer:
     def __init__(self,n_layers,d_hidden,d_model,n_heads,v_size,mask,d_latent = 0):
         self.n_layers = n_layers
         self.d_hidden = d_hidden
-        self.layers = {}
+        self.layers = {'embed' : Embeddings(d_model,v_size)}
         for i in range(n_layers):
             self.layers['block'+str(i)] = TransformerBlock(d_model,d_hidden,n_heads,mask,d_latent=d_latent)
         self.layers['pred_head'] = PredictionHead(d_model,v_size)
         
     def init(self,key):
-        keys = jax.random.split(key,self.n_layers+1)
+        keys = jax.random.split(key,self.n_layers+2)
         params = {}
         for i,(name,layer) in enumerate(self.layers.items()):
             params[name] = layer.init(keys[i])
@@ -260,27 +273,100 @@ class Transformer:
             x = layer(params[name],x)
         return x
 
+
+class DataSet:
     
+    def __init__(self,tokens,batch_size,seq_len):
+        self.seq_len = seq_len
+        self.batch_size = batch_size
+        n_seqs = len(tokens) // seq_len
+        self.data = tokens[:n_seqs*seq_len].reshape(-1,seq_len)
+        
+    def shuffle(self,key):
+        self.data = jax.random.permutation(key,self.data)
+        n_batches = len(self.data) // batch_size
+        self.data = self.data[:n_batches*batch_size].reshape(-1,self.batch_size,self.seq_len)
+       
+    def __iter__(self):
+        for batch in self.data:
+            yield batch
+        
+
+            
+def crossentropy(targets,logits):
+    probs = softmax(logits)
+    logprobs = jnp.log(probs)
+    loss = -jnp.mean(logprobs[...,targets])
+    return loss
+
 # deepseek-v2
 # d_latent = 4*(d_model // n_heads) 
-    
-# small test         
-d_model = 6
-hidden_dim = 5
-n_heads = 3
-b_size = 2
-s_len = 3
-d_latent = 3
-n_layers = 2
-v_size = 10
-causal_mask = jnp.triu(jnp.ones((s_len, s_len)), k=1).astype(bool)
-input_shape = (2,3,6)
+
+# small test
+seqlen = 3
+causal_mask = jnp.triu(jnp.ones((seqlen, seqlen)), k=1).astype(bool)
 key = jax.random.PRNGKey(42)
-data = jax.random.normal(key,input_shape)
-transformer = Transformer(n_layers,hidden_dim,d_model,n_heads,v_size,causal_mask,d_latent=1)
+token_ids = jnp.ones((2, seqlen), dtype=jnp.int32)  # [batch=2, seq_len=3]
+token_ids = jnp.array([
+    [0, 1, 2],  # Sequence 1
+    [3, 4, 5]   # Sequence 2
+])
+targets = jnp.array([
+    [1, 2, 3],
+    [4, 5, 6]
+])
+x = jnp.array([
+    [0, 1,2],
+    [3, 4,5]
+])
+transformer = Transformer(
+    n_layers=2, 
+    d_hidden=8, 
+    d_model=16, 
+    n_heads=4,
+    v_size=256,  
+    mask=causal_mask,
+    d_latent=4
+)
+print('__________ model parameters: ')
 params = transformer.init(key)
-print(transformer(params,data).shape)
+print(params)
+print('_____________________________')
+
+def forward_loss(params,model,batch,targets):
+    logits = transformer(params,x)
+    logits = logits - jnp.max(logits, axis=-1, keepdims=True)
+    loss = crossentropy(targets,logits)
+    return loss
 
 
-        
-    
+forward_loss(params,transformer,x,targets)
+
+gradient = jax.value_and_grad(forward_loss)
+
+def step(params,opt_state,batch,targets,model):
+    loss,grads = gradient(params,model,batch,targets)
+    updates, new_opt_state = optimizer.update(grads, opt_state)
+    new_params = optax.apply_updates(params, updates)
+    return new_params, new_opt_state,loss
+
+
+optimizer = optax.adam(
+    learning_rate=1e-4, 
+    b1=0.9,             
+    b2=0.999,           
+    eps=1e-8            
+)
+opt_state = optimizer.init(params)
+
+optimizer = optax.sgd(
+    learning_rate=0.1  # Tune this to your liking!
+)
+
+# Initialize it with your params!
+opt_state = optimizer.init(params)
+
+for epoch in range(2000):
+    params,opt_state,loss = step(params,opt_state,x,targets,transformer)
+    print(loss)
+print(softmax(transformer(params,x)))
