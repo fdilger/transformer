@@ -13,7 +13,8 @@ def silu(x):
 
 
 def softmax(x):
-    exps = jnp.exp(x)
+    logits = x - jnp.max(x, axis=-1, keepdims=True)
+    exps = jnp.exp(logits)
     return exps / exps.sum(axis=-1,keepdims=True)
 
 def log_softmax(x):
@@ -230,17 +231,17 @@ class PredictionHead:
         return jnp.einsum('btc,cj->btj',x,params['w']) + params['b']
          
 class Patching:
-    def __init__(self,model,vocab):
+    def __init__(self,model,tokenizer):
         self.model = model
-        self.vocab = vocab
+        self.tokenizer = tokenizer
         
     def init(self):
-        return model.init()
+        return  model.init()
         
     def byte_entropy(x,params):
-        probs = model(x,params)
-        return sum(probs[vocab[x]]*log(probs[v]) for v in vocab.items())
-    
+        probs = model(params,x)
+        return -jnp.sum((probs * jnp.log(probs+1e-10)),axis=-1)
+
     def local_entropy_patching(x,omega,params):
         ent = [byte_entropy(xi,params) for xi in x]
         return [1 if xi-xprev>omega else 0 for xi,xprev in zip(ent,[0]+ent[:-1])]
@@ -248,6 +249,44 @@ class Patching:
     def global_entropy_patching(x,omega,params):
         ent = [byte_entropy(xi,params) for xi in x]
         return [1 if xi>omega else 0 for xi in ent]
+
+class CrossAttention:
+     def __init__(self,n_heads,d_model,d_keys,,mask):
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.d_head = d_model//n_heads
+        self.mask = mask
+        
+    def init(self,key):
+        d = self.d_head
+        keys = jax.random.split(key, 4)
+        scale = jnp.sqrt(1/self.d_model)
+        wq = jax.random.normal(keys[0],(self.n_heads,self.d_model,d)) * scale
+        wk = jax.random.normal(keys[1],(self.n_heads,self.d_model,d)) * scale
+        wv = jax.random.normal(keys[2],(self.n_heads,self.d_model,d)) * scale
+        wo = jax.random.normal(keys[3],(self.n_heads,d,self.d_model)) * scale
+        return {
+                'query_proj': wq,
+                'key_proj': wk,
+                'value_proj': wv,
+                'out_proj': wo
+               }
+    
+    def __call__(self,params,q,k,v):
+        queries = jnp.einsum('btc,ncj-> bntj',q,params['query_proj'])
+        keys = jnp.einsum('btc,ncj->bntj',k,params['key_proj'])
+        values = jnp.einsum('btc,ncj->bntj',v,params['value_proj'])
+        att = jnp.einsum('bntj,bnsj->bnts',queries,keys)
+        att_scaled = att / jnp.sqrt(self.d_model)
+        att_masked = jnp.where(self.mask, -jnp.inf, att_scaled)
+        att_scores = softmax(att_masked)
+        att_values = jnp.einsum('bnts,bnsv-> bntv',att_scores,values)
+        att_output = jnp.einsum('bntv,nvk->btk', att_values,params['out_proj'])
+        return att_output+q
+    
+class ByteEncoder:
+    def __init__(self,):
+        # for patch cross attention q = patches, kv= original byte embeddings
     
 
 class ByteTokenizer:
