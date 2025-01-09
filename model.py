@@ -216,6 +216,8 @@ class TransformerBlock:
     def __len__(self):
         return sum(len(layer) for layer in self.layers.values())
 
+class CrossTransformerBlock:
+    pass
 
 class PredictionHead:
     def __init__(self,d_model,v_size):
@@ -229,42 +231,26 @@ class PredictionHead:
         return {'w':w,'b':b}
     def __call__(self,params,x):
         return jnp.einsum('btc,cj->btj',x,params['w']) + params['b']
-         
-class Patching:
-    def __init__(self,model,tokenizer):
-        self.model = model
-        self.tokenizer = tokenizer
-        
-    def init(self):
-        return  model.init()
-        
-    def byte_entropy(x,params):
-        probs = model(params,x)
-        return -jnp.sum((probs * jnp.log(probs+1e-10)),axis=-1)
 
-    def local_entropy_patching(x,omega,params):
-        ent = [byte_entropy(xi,params) for xi in x]
-        return [1 if xi-xprev>omega else 0 for xi,xprev in zip(ent,[0]+ent[:-1])]
     
-    def global_entropy_patching(x,omega,params):
-        ent = [byte_entropy(xi,params) for xi in x]
-        return [1 if xi>omega else 0 for xi in ent]
-
 class CrossAttention:
-     def __init__(self,n_heads,d_model,d_keys,,mask):
+    
+     def __init__(self,n_heads,d_model,d_k,d_v,mask):
         self.d_model = d_model
         self.n_heads = n_heads
         self.d_head = d_model//n_heads
+        self.d_k = d_k
+        self.d_v = d_v
         self.mask = mask
         
     def init(self,key):
         d = self.d_head
         keys = jax.random.split(key, 4)
         scale = jnp.sqrt(1/self.d_model)
-        wq = jax.random.normal(keys[0],(self.n_heads,self.d_model,d)) * scale
-        wk = jax.random.normal(keys[1],(self.n_heads,self.d_model,d)) * scale
-        wv = jax.random.normal(keys[2],(self.n_heads,self.d_model,d)) * scale
-        wo = jax.random.normal(keys[3],(self.n_heads,d,self.d_model)) * scale
+        wq = jax.random.normal(keys[0],(self.n_heads,self.d_model,self.d_head))    * scale
+        wk = jax.random.normal(keys[1],(self.n_heads,self.d_k,    self.d_head))    * scale
+        wv = jax.random.normal(keys[2],(self.n_heads,self.d_v,    self.d_head))    * scale
+        wo = jax.random.normal(keys[3],(self.n_heads,d,           self.d_model))   * scale
         return {
                 'query_proj': wq,
                 'key_proj': wk,
@@ -277,18 +263,70 @@ class CrossAttention:
         keys = jnp.einsum('btc,ncj->bntj',k,params['key_proj'])
         values = jnp.einsum('btc,ncj->bntj',v,params['value_proj'])
         att = jnp.einsum('bntj,bnsj->bnts',queries,keys)
-        att_scaled = att / jnp.sqrt(self.d_model)
+        # scale by head dim
+        att_scaled = att / jnp.sqrt(self.d_head)
         att_masked = jnp.where(self.mask, -jnp.inf, att_scaled)
         att_scores = softmax(att_masked)
         att_values = jnp.einsum('bnts,bnsv-> bntv',att_scores,values)
         att_output = jnp.einsum('bntv,nvk->btk', att_values,params['out_proj'])
         return att_output+q
+
     
 class ByteEncoder:
-    def __init__(self,):
+    # operates on byte embeddings
+    def __init__(self,c_model,e_model,omega):
+        self.embed = Embeddings(c_model.d_model,tokenizer.v_size)
+        self.c_model = model
+        self.e_model = model
+        self.omega = omega
+        
+    def init(self,key):
+        patch_embed = jax.random.normal(key,(self.c_model.d_model,self.d_embed)
+        return {'patch_model' : self.e_model.init(key), 'rep_model': self.c_model.init(key), 'patch_embed' : patch_embed}
+
+    def byte_entropy(x,params):
+        probs = model(params,x)
+        return -jnp.sum((probs * jnp.log(probs+1e-10)),axis=-1)
+
+    def local_entropy_patching(x,omega,params):
+        ent = [byte_entropy(xi,params) for xi in x]
+        res = []
+        k = -1
+        for (xi,xprev) in zip(ent,[0]+ent[:-1]):
+            if xi-xprev>omega:
+                k+=1
+                res.append(k)
+            else:
+                res.append(k)
+        return k,res
+    
+    def global_entropy_patching(x,omega,params):
+        ent = [byte_entropy(xi,params) for xi in x]
+        return [1 if xi>omega else 0 for xi in ent]
+    
+    def max_pool(x):
+        # segment_max doesn't work with batches so we'll do this terribleness until i bother to write a good segment_max
+        num_segments,segments = patching.local_entropy_patching(x,self.omega,params) # segments with model
+        results = []
+        for i,seq in enumerate(x):
+            results.append(jax.ops.segment_max(seq,segments[i],num_segments = num_segments[i]))
+        return jnp.stack(results)
+        
+        
+    def __call__(self,x):
+        # apply transformer with cross attention
+        patches = max_pool(x)
+        for layer in layers.items():
+            patches = layer(patches)
+        return x
         # for patch cross attention q = patches, kv= original byte embeddings
     
-
+# mask = (segments[:, :, None] == segments[:, None, :]) patch-mask
+# first compute the byte representations meant for the entropy model
+# pass these to entropy model for patches
+# max pool patches
+# project patches to cross attention model with cross attention to original byte representations
+# -> remove embedding from the transformer class
 class ByteTokenizer:
     def __init__(self,data,d_model):
         unique_bytes = sorted(set(data))
@@ -302,6 +340,7 @@ class ByteTokenizer:
     def decode(self,params,token):
         return id_to_byte[token]
 
+    
 class Embeddings:
     def __init__(self,d_model,v_size):
         self.d_model=d_model
@@ -313,7 +352,9 @@ class Embeddings:
     def __call__(self,params,token_ids):
         return params['w_embed'][token_ids]
 
-    
+
+                                        
+
 class Transformer:
     def __init__(self,n_layers,d_hidden,d_model,n_heads,v_size,mask,d_latent = 0):
         self.n_layers = n_layers
@@ -324,7 +365,7 @@ class Transformer:
         self.layers['pred_head'] = PredictionHead(d_model,v_size)
         
     def init(self,key):
-        keys = jax.random.split(key,self.n_layers+2)
+        keys = jax.random.split(key,self.n_layers+1))
         params = {}
         for i,(name,layer) in enumerate(self.layers.items()):
             params[name] = layer.init(keys[i])
@@ -353,8 +394,7 @@ class DataSet:
         for batch in self.data:
             yield batch
         
-
-            
+        
 def crossentropy(targets,logits):
     probs = softmax(logits)
     logprobs = jnp.log(probs)
