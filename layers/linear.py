@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+from ..activations.silu import silu
 
 class PredictionHead:
     def __init__(self,d_model,v_size):
@@ -11,6 +12,8 @@ class PredictionHead:
         w = jax.random.normal(keys[0],(self.d_model,self.v_size))*1/jnp.sqrt(self.d_model)
         b = jax.random.normal(keys[1],(self.v_size,))*1/jnp.sqrt(self.d_model)
         return {'w':w,'b':b}
+    def __call__(self,params,x):
+        return jnp.einsum('btc,cj->btj',x,params['w'])+params['b']
 
     
 class FFN:
@@ -25,7 +28,7 @@ class FFN:
         weights2 = jax.random.normal(keys[1], (self.hidden_dim, self.out_dim))
         return {'ffnw1': weights1, 'ffnw2': weights2}
         
-    def __call__(self, params, x):
+    def __call__(self, params,x):
         y = jnp.dot(x, params['ffnw1'])
         y = silu(y)
         y = jnp.dot(y,params['ffnw2'])
