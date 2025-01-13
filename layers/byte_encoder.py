@@ -45,7 +45,6 @@ class ByteEncoder:
     def __call__(self,x):
         # apply transformer with cross attention
         patches = max_pool(x)
-        for layer in layers.items():
-            patches = layer(patches)
-        return x
+        rs = c_model(params,patches,x,x)
+        return rs
         # for patch cross attention q = patches, kv= original byte embeddings

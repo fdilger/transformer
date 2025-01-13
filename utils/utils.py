@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+from math import prod
 
 def sigmoid(x):
     return 1 / (1+jnp.exp(-x))
@@ -20,5 +21,11 @@ def crossentropy(targets,logits):
     loss = -jnp.mean(logprobs[...,targets])
     return loss
 
-
+def count_params(params):
+    if isinstance(params,jax.Array):
+        return prod(params.shape)
+    if isinstance(params,dict):
+        return sum(count_params(item) for item in params.values())
+    return 1
+        
 
