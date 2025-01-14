@@ -1,0 +1,3 @@
+- split embedding and transformer
+- write the crossattention transformer
+- reogranise thhe whole thing wtf

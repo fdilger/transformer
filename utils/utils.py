@@ -15,9 +15,9 @@ def log_softmax(x):
     exps = jnp.exp(x)
     return jnp.log(exps / exps.sum(axis=-1,keepdims=True))
 
-def crossentropy(targets,logits):
+def crossentropy(targets,logits,eps=1e-10):
     probs = softmax(logits)
-    logprobs = jnp.log(probs)
+    logprobs = jnp.log(probs+eps)
     loss = -jnp.mean(logprobs[...,targets])
     return loss
 

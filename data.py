@@ -13,7 +13,7 @@ class DataSet:
        
     def __iter__(self):
         for batch in self.data:
-            yield batch
+            yield sbatch
 
 
         

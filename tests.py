@@ -5,7 +5,9 @@ import optax
 from jax import grad
 from .utils.utils import *
 from .layers.byte_encoder import ByteEncoder
+from .layers.transformer import TransformerDecoderBlock,TransformerEncoderBlock
 from .model import TransformerDecoder,TransformerEncoder
+
 from .layers.rope import Rope
 
 def forward_loss(params,model,batch,targets):
@@ -46,8 +48,8 @@ def decoder_test():
         [4, 5, 6]
     ])
     x = jnp.array([
-        [0, 1,2],
-        [3, 4,5]
+        [0, 1, 2],
+        [3, 4, 5]
     ])
     transformer = TransformerDecoder(
         n_layers=2, 
@@ -212,16 +214,26 @@ def byte_test():
     )
 
     byte_encoder = ByteEncoder(
-        c_model,
-        e_model,
-        omega = 0.5,
+        d_model = 16,
+        omega = 0.0,
         v_size=256,
-        d_model = 3
+        n_heads = 4,
+        mask = causal_mask,
+        d_latent = 4,
+        seq_len = 3
     )
-    
+    print('byte encoder input shape: ')
+    print(x.shape)
+    print('byte encoder pooled shapes')
     params = byte_encoder.init(key)
-    print(byte_encoder(params,x).shape)
 
+    x = byte_encoder(params,x)
+    print('byete encoder output shape: ')
+    print(x.shape)
+
+
+decoder_test()
+encoder_test()
 byte_test()
 
     

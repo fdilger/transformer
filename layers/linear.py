@@ -10,10 +10,9 @@ class PredictionHead:
     def init(self,key):
         keys = jax.random.split(key,2)
         w = jax.random.normal(keys[0],(self.d_model,self.v_size))*1/jnp.sqrt(self.d_model)
-        b = jax.random.normal(keys[1],(self.v_size,))*1/jnp.sqrt(self.d_model)
-        return {'w':w,'b':b}
+        return {'w':w}
     def __call__(self,params,x):
-        return jnp.einsum('btc,cj->btj',x,params['w'])+params['b']
+        return jnp.einsum('btc,cj->btj',x,params['w'])
 
     
 class FFN:
