@@ -4,6 +4,7 @@ import optax
 
 from jax import grad
 from .utils.utils import *
+from .layers.byte_encoder import ByteEncoder
 from .model import TransformerDecoder,TransformerEncoder
 from .layers.rope import Rope
 
@@ -88,6 +89,8 @@ def decoder_test():
         print(loss)
         print(softmax(transformer(params,x)))
 
+
+        
 def encoder_test():
     # this should work with kinda any key and value dim
     seqlen = 3
@@ -152,30 +155,76 @@ def encoder_test():
     for epoch in range(100):
         params,opt_state,loss = step_cross(params,opt_state,x,targets,transformer,gradient,optimizer,k,v)
         print(loss)
+
+def byte_test():
+    '''
+    tokenids -> transformer -> representations + patches - pool > patches - cross attention to representations transformer >
+    final patch representations
     
-encoder_test()
 
 
 
+    '''
 
 
 
+    
+    seqlen = 3
+    key = jax.random.PRNGKey(42)
+    causal_mask = jnp.triu(jnp.ones((3,3)),k=1).astype(bool)
+
+    
+    token_ids = jnp.ones((2, seqlen), dtype=jnp.int32)  # [batch=2, seq_len=3]
+    token_ids = jnp.array([
+        [0, 1, 2],  # Sequence 1
+        [3, 4, 5]   # Sequence 2
+    ])
+    
+    targets = jnp.array([
+        [1, 2, 3],
+        [4, 5, 6]
+    ])
+    
+    x = jnp.array([
+        [0, 1,2],
+        [3, 4,5]
+    ])
+    
+    c_model = TransformerEncoder(
+        n_layers=2, 
+        d_hidden=8, 
+        d_model=16, 
+        n_heads=4,
+        v_size=256,  
+        mask=causal_mask,
+        d_k = 16,
+        d_v = 16
+    )
+
+    e_model = TransformerDecoder(
+        n_layers=2, 
+        d_hidden=8, 
+        d_model=16, 
+        n_heads=4,
+        v_size=256,  
+        mask=causal_mask,
+        d_latent = 4
+    )
+
+    byte_encoder = ByteEncoder(
+        c_model,
+        e_model,
+        omega = 0.5,
+        v_size=256,
+        d_model = 3
+    )
+    
+    params = byte_encoder.init(key)
+    print(byte_encoder(params,x).shape)
+
+byte_test()
+
+    
 
 
-
-
-
-
-
-
-
-
-## TODO: ##
-# - implement different FFN
-# - add jax.lax.scan optimisations
-# - implement rope
-#
-#
-#
-#
-# -----
+        

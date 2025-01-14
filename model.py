@@ -88,7 +88,11 @@ class TransformerEncoder:
     def __init__(self,n_layers,d_hidden,d_model,d_k,d_v,n_heads,v_size,mask):
         self.n_layers = n_layers
         self.d_hidden = d_hidden
-        self.layers = {'embed' : Embeddings(d_model,v_size)}
+        self.d_model = d_model
+        
+        self.layers = {}
+        #self.layers = {'embed' : Embeddings(d_model,v_size)}
+        
         for i in range(n_layers):
             self.layers['block'+str(i)] = TransformerEncoderBlock(d_model,d_hidden,n_heads,mask,d_k,d_v)
         self.layers['pred_head'] = PredictionHead(d_model,v_size)
