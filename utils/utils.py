@@ -18,7 +18,9 @@ def log_softmax(x):
 def crossentropy(targets,logits,eps=1e-10):
     probs = softmax(logits)
     logprobs = jnp.log(probs+eps)
-    loss = -jnp.mean(logprobs[...,targets])
+    target_logprobs = jnp.take_along_axis(logprobs, jnp.expand_dims(targets, axis=-1), axis=-1)
+    #loss = -jnp.mean(logprobs[...,targets])
+    loss = -jnp.mean(target_logprobs)
     return loss
 
 def count_params(params):
@@ -28,4 +30,5 @@ def count_params(params):
         return sum(count_params(item) for item in params.values())
     return 1
         
+
 

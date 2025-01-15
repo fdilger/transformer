@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 
 from ..normalization.layer_norm import LayerNorm
-from ..layers.attention import LatentAttention,CrossAttention
+from ..layers.attention import LatentAttention,CrossAttention,Attention
 from ..layers.linear import FFN
 from ..utils.utils import softmax
 
@@ -16,8 +16,9 @@ class TransformerDecoderBlock:
 
     def init(self,key):
         params = {}
-        for name,layer in self.layers.items():
-            params[name] = layer.init(key)
+        keys = jax.random.split(key,4)
+        for i,(name,layer) in enumerate(self.layers.items()):
+            params[name] = layer.init(keys[i])
         return params
             
     def __call__(self,params,x):

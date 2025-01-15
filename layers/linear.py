@@ -9,7 +9,7 @@ class PredictionHead:
         
     def init(self,key):
         keys = jax.random.split(key,2)
-        w = jax.random.normal(keys[0],(self.d_model,self.v_size))*1/jnp.sqrt(self.d_model)
+        w = jax.random.normal(keys[0],(self.d_model,self.v_size))*1/(jnp.sqrt(self.d_model))
         return {'w':w}
     def __call__(self,params,x):
         return jnp.einsum('btc,cj->btj',x,params['w'])
@@ -23,8 +23,8 @@ class FFN:
     
     def init(self, key):
         keys = jax.random.split(key, 2)
-        weights1 = jax.random.normal(keys[0], (self.in_dim, self.hidden_dim))
-        weights2 = jax.random.normal(keys[1], (self.hidden_dim, self.out_dim))
+        weights1 = jax.random.normal(keys[0], (self.in_dim, self.hidden_dim))*1/(jnp.sqrt(self.hidden_dim))
+        weights2 = jax.random.normal(keys[1], (self.hidden_dim, self.out_dim))*1/(jnp.sqrt(self.hidden_dim))
         return {'ffnw1': weights1, 'ffnw2': weights2}
         
     def __call__(self, params,x):

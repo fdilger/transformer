@@ -37,9 +37,10 @@ class TransformerDecoder:
         return params
     
     def __call__(self,params,x):
+        y = x 
         for name,layer in self.layers.items():
-            x = layer(params[name],x)
-        return x
+            y = layer(params[name],y)
+        return y
 
 
 class TransformerEncoder:

@@ -3,6 +3,7 @@ import jax.numpy as jnp
 
 from jax import random
 from ..utils.utils import softmax
+from ..layers.rope import Rope
 
 class Attention:
     def __init__(self,n_heads,d_model,mask):
@@ -10,6 +11,9 @@ class Attention:
         self.n_heads = n_heads
         self.d_head = d_model//n_heads
         self.mask = mask
+        self.seq_len = 127
+        self.rope = Rope(self.d_head,self.seq_len)
+        self.cos,self.sin = self.rope.init()
         
     def init(self,key):
         d = self.d_head
@@ -30,9 +34,13 @@ class Attention:
         queries = jnp.einsum('btc,ncj-> bntj',x,params['query_proj'])
         keys = jnp.einsum('btc,ncj->bntj',x,params['key_proj'])
         values = jnp.einsum('btc,ncj->bntj',x,params['value_proj'])
+
+       
+
+        
         att = jnp.einsum('bntj,bnsj->bnts',queries,keys)
-        att_scaled = att / jnp.sqrt(self.d_model)
-        att_masked = jnp.where(self.mask, -jnp.inf, att_scaled)
+        att_scaled = att / jnp.sqrt(self.d_head)
+        att_masked = jnp.where(self.mask, -1e-9, att_scaled)
         att_scores = softmax(att_masked)
         att_values = jnp.einsum('bnts,bnsv-> bntv',att_scores,values)
         att_output = jnp.einsum('bntv,nvk->btk', att_values,params['out_proj'])
