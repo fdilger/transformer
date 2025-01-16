@@ -261,11 +261,11 @@ def step(params,state,batch,targets):
     updates, state = opt.update(grads, state,params)
     params = optax.apply_updates(params=params, updates=updates)
     return params,state,val
-print(type(schedule))
+#print(type(schedule))
 b=0
 p = 0
 
-for epoch in [0]:
+for epoch in [0,1,2]:
     for batch,targets in zip(train_xs,train_ys):
         b+=1
         params,state,val = step(params,state,batch,targets)
@@ -318,11 +318,11 @@ class Sampler:
 
 for k in ['a','b','c','d','e','f','h']:
     b = k.encode('ascii')
-    print(b)
-    print(tokenizer.encode(b))
+    #print(b)
+    #print(tokenizer.encode(b))
     c = np.array(tokenizer.encode(b))
-    print(c)
-    print(tokenizer.decode(c[0]))
+    #print(c)
+   # print(tokenizer.decode(c[0]))
 
 
 
@@ -330,7 +330,7 @@ for k in ['a','b','c','d','e','f','h']:
 
 
 
-print(tokenized[0:4])
+#print(tokenized[0:4])
 s = Sampler(temp=2)
 x = jnp.zeros(shape = (1,127), dtype=jnp.int32)
 x = x.at[0,0].set(18)
@@ -347,7 +347,7 @@ for k in range(50):
     x= x.at[0,k+4].set(a)
 
 
-print(x)
+#print(x)
 bs = [tokenizer.decode(a) for a in np.array(x)[0]]
 string1 = bytes(bs).decode('ascii')
 print(string1)

@@ -1,36 +1,42 @@
 import jax
 import jax.numpy as jnp
 from ..activations.silu import silu
+from .mtypes import Tensor, Shape, Any, Callable, Params, PRNGKey
 
-class PredictionHead:
-    def __init__(self,d_model,v_size):
-        self.d_model = d_model
-        self.v_size = v_size
+
+
+class Embedding:
+    def __init__(self, in_dim : int, out_dim : int) -> None:
+        self.in_dim = in_dim
+        self.out_dim = out_dim
         
-    def init(self,key):
-        keys = jax.random.split(key,2)
-        w = jax.random.normal(keys[0],(self.d_model,self.v_size))*1/(jnp.sqrt(self.d_model))
-        return {'w':w}
-    def __call__(self,params,x):
-        return jnp.einsum('btc,cj->btj',x,params['w'])
+    def init(self, key : PRNGKey) -> Params:
+        scale = 1/self.in_dim
+        return {'w_embed': jax.random.normal(key,(self.in_dim,self.out_dim))}
+    
+    def __call__(self,params : Params,x : Tensor) -> Tensor:
+        return jnp.einsum('btc,cj->btj', x, params['w_embed'])
+    
 
     
 class FFN:
-    def __init__(self,in_dim,hidden_dim,out_dim):
+    def __init__(self,in_dim : int, ff_dim : int ,out_dim : int) -> None:
         self.in_dim = in_dim
-        self.hidden_dim = hidden_dim
+        self.ff_dim = ff_dim
         self.out_dim = out_dim
     
-    def init(self, key):
-        keys = jax.random.split(key, 2)
-        weights1 = jax.random.normal(keys[0], (self.in_dim, self.hidden_dim))*1/(jnp.sqrt(self.hidden_dim))
-        weights2 = jax.random.normal(keys[1], (self.hidden_dim, self.out_dim))*1/(jnp.sqrt(self.hidden_dim))
-        return {'ffnw1': weights1, 'ffnw2': weights2}
+    def init(self, key : PRNGKey) -> Params:
+        k1, k2 = jax.random.split(key, 2)
+        scale  = 1 / jnp.sqrt(self.ff_dim)
         
-    def __call__(self, params,x):
-        y = jnp.einsum('btc,cj->btj',x, params['ffnw1'])
+        ffn_w1 = jax.random.normal(k1, (self.in_dim, self.ff_dim))  * scale 
+        ffn_w2 = jax.random.normal(k2, (self.ff_dim, self.out_dim)) * scale
+        return {'ffn_w1': ffn_w1, 'ffn_w2': ffn_w2}
+        
+    def __call__(self, params : Params, x : Tensor):
+        y = jnp.einsum('btc,cj->btj', x, params['ffn_w1'])
         y = silu(y)
-        y = jnp.einsum('btc,cj->btj',y, params['ffnw2'])
+        y = jnp.einsum('btc,cj->btj', y, params['ffn_w2'])
         return silu(y)+x
 
 
@@ -52,4 +58,3 @@ class LatentCompression:
         return silu(jnp.einsum('btj,js->bts',x,params['up']))
 
     
-y

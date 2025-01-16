@@ -1,6 +1,9 @@
 import jax
 import jax.numpy as jnp
 from math import prod
+from .mtypes import Tensor, Shape, Any, Callable, Params, PRNGKey
+
+
 
 def sigmoid(x):
     return 1 / (1+jnp.exp(-x))
@@ -22,7 +25,7 @@ def crossentropy(targets,logits,eps=1e-10):
     loss = -jnp.mean(target_logprobs)
     return loss
 
-def count_params(params):
+def count_params(params : Params) -> int:
     if isinstance(params,jax.Array):
         return prod(params.shape)
     if isinstance(params,dict):
