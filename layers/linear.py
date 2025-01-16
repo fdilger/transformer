@@ -28,9 +28,9 @@ class FFN:
         return {'ffnw1': weights1, 'ffnw2': weights2}
         
     def __call__(self, params,x):
-        y = jnp.dot(x, params['ffnw1'])
+        y = jnp.einsum('btc,cj->btj',x, params['ffnw1'])
         y = silu(y)
-        y = jnp.dot(y,params['ffnw2'])
+        y = jnp.einsum('btc,cj->btj',y, params['ffnw2'])
         return silu(y)+x
 
 
@@ -52,3 +52,4 @@ class LatentCompression:
         return silu(jnp.einsum('btj,js->bts',x,params['up']))
 
     
+y

@@ -2,8 +2,7 @@ import jax
 import jax.numpy as jnp
 from jax import grad
 import optax
-
-
+import numpy as np
 
 from .tokenization.byte_tokenizer import ByteTokenizer
 from .model import TransformerDecoder
@@ -143,6 +142,38 @@ def run_event_loop(loop):
 
 threading.Thread(target=run_event_loop, args=(monitor.loop,), daemon=True).start()
 
+    
+def to_numpy(tree):
+    """Recursively convert all jax.DeviceArray leaves to np.ndarray."""
+    if isinstance(tree, dict):
+        return {k: to_numpy(v) for k, v in tree.items()}
+    elif hasattr(tree, 'device_buffer'):  
+        # This checks if 'tree' is a jax.DeviceArray-like object
+        return np.array(tree)
+    else:
+        return tree
+
+def to_jax(tree):
+    """Recursively convert all np.ndarray leaves to jnp.array."""
+    if isinstance(tree, dict):
+        return {k: to_jax(v) for k, v in tree.items()}
+    elif isinstance(tree, np.ndarray):
+        return jnp.array(tree)
+    else:
+        return tree
+
+def save_checkpoint(filename, dictionary):
+    """Save nested parameter dictionary (JAX -> NumPy -> disk)."""
+    numpy_dict = to_numpy(dictionary)
+    np.save(filename, numpy_dict, allow_pickle=True)
+
+def load_checkpoint(filename):
+    """Load nested parameter dictionary (disk -> NumPy -> JAX)."""
+    loaded = np.load(filename + '.npy', allow_pickle=True).item()
+    return to_jax(loaded)
+
+
+
 def load_tiny_shakespeare_bytes():
      with open('transformer/datasets/tinyshakespeare/input.txt', 'r', encoding='ascii') as f:
          text = f.read()
@@ -161,7 +192,7 @@ tokenized = tokenizer.encode(data)
 data = tokenized
 num_bytes = len(data)
 print(data.shape)
-
+print(tokenizer.v_size)
 
 batch_size = 32
 seq_len = 128
@@ -180,13 +211,14 @@ batched = batch(batch_size,seq_len,data)
 
 xs = batched[:,:,:seq_len-1]
 ys = batched[:,:,1:]
+ys = jax.nn.one_hot(ys, tokenizer.v_size)
 print(len(xs))
 
 train_xs = xs[:len(xs)-5,:,:]
 train_ys = ys[:len(ys)-5,:,:]
 test_xs = xs[len(xs)-5:,:,:]
 test_ys = ys[len(ys)-5:,:,:]
-
+print(train_xs[0])
 # init model
 print(train_xs.shape)
 print(train_ys.shape)
@@ -196,7 +228,7 @@ model = TransformerDecoder(
     d_hidden = 4*256,
     n_heads = 8,
     v_size = tokenizer.v_size,
-    mask = jnp.tril(jnp.ones((seq_len-1, seq_len-1)), k=1).astype(bool)
+    mask = jnp.triu(jnp.ones((seq_len-1, seq_len-1)), k=1).astype(bool)
 )
 
 
@@ -220,18 +252,20 @@ state = opt.init(params)
 
 def loss(params,targets,batch):
     logits = model(params,batch)
-    loss = crossentropy(targets,logits)
-    return loss
+    #    loss = crossentropy(targets,logits)
+    loss = optax.softmax_cross_entropy(logits,targets)
+    return jnp.mean(loss)
 @jax.jit
 def step(params,state,batch,targets):
-    val,grads = jax.value_and_grad(loss)(params, batch,targets)
+    val,grads = jax.value_and_grad(loss)(params, targets,batch)
     updates, state = opt.update(grads, state,params)
     params = optax.apply_updates(params=params, updates=updates)
     return params,state,val
 print(type(schedule))
 b=0
-p = 25
-for epoch in epochs:
+p = 0
+
+for epoch in [0]:
     for batch,targets in zip(train_xs,train_ys):
         b+=1
         params,state,val = step(params,state,batch,targets)
@@ -247,7 +281,80 @@ for epoch in epochs:
                 p = v_loss/n
             print('val loss '+ str(p))
             monitor.send_training_update(val,p,schedule(state[2][0]),epoch+1,10,round(b/train_xs.shape[0]*len(epochs)))
-            # 
-            
+    save_checkpoint('tinyshakes', params)
+
+v_loss = 0
+n = 0
+for batch1,targets1 in zip(train_xs[0:10],train_ys[0:10]):
+    n+=1
+    v_loss += loss(params,targets1,batch1)
+p = v_loss/n
+print('train loss first 10 batches'+ str(p))
+
+
+
+class Sampler:
+    def __init__(self,temp=1,top_k=None,top_p=None,min_p=None):
+        self.temp = temp
+        self.top_k = top_k
+        self.top_p = top_p
+        self.min_p = min_p
+        self.key = jax.random.key(42)
+    def __call__(self,logits):
         
-    
+        logits = logits - jnp.max(logits, axis=-1, keepdims=True)
+        # Convert to probabilities using stable softmax
+        probs = jax.nn.softmax(logits)
+        # Sample with fresh key
+        self.key, subkey = jax.random.split(self.key)
+        sampled = jax.random.categorical(subkey, logits)
+        return sampled
+
+
+
+
+
+
+
+for k in ['a','b','c','d','e','f','h']:
+    b = k.encode('ascii')
+    print(b)
+    print(tokenizer.encode(b))
+    c = np.array(tokenizer.encode(b))
+    print(c)
+    print(tokenizer.decode(c[0]))
+
+
+
+
+
+
+
+print(tokenized[0:4])
+s = Sampler(temp=2)
+x = jnp.zeros(shape = (1,127), dtype=jnp.int32)
+x = x.at[0,0].set(18)
+x = x.at[0,1].set(47)
+x = x.at[0,2].set(56)
+x = x.at[0,3].set(57)
+print(x)
+for k in range(50):
+    c = model(params,x)
+    print(c.shape)
+    logits = c[0][k+4]
+    a  = s(logits)
+    print(a)
+    x= x.at[0,k+4].set(a)
+
+
+print(x)
+bs = [tokenizer.decode(a) for a in np.array(x)[0]]
+string1 = bytes(bs).decode('ascii')
+print(string1)
+
+
+
+
+
+
+

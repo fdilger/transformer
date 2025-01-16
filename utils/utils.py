@@ -19,7 +19,6 @@ def crossentropy(targets,logits,eps=1e-10):
     probs = softmax(logits)
     logprobs = jnp.log(probs+eps)
     target_logprobs = jnp.take_along_axis(logprobs, jnp.expand_dims(targets, axis=-1), axis=-1)
-    #loss = -jnp.mean(logprobs[...,targets])
     loss = -jnp.mean(target_logprobs)
     return loss
 
